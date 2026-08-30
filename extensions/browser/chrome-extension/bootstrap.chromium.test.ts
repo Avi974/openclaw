@@ -200,7 +200,7 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
         OPENCLAW_GATEWAY_PORT: String(gatewayPort),
       },
       async () => {
-        const extensionSource = path.dirname(fileURLToPath(import.meta.url));
+        const extensionSource = await fs.realpath(path.dirname(fileURLToPath(import.meta.url)));
         // Match installation: Chrome launches the built host, not a fresh tsx
         // compilation of the source graph inside each bounded native request.
         const launchFixture = await nativeHostFixture(
