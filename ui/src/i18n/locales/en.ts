@@ -1238,6 +1238,8 @@ export const en: TranslationMap = {
     stopCloudWorker: "Stop cloud worker…",
     stopCloudWorkerConfirm: 'Stop the cloud worker for "{session}"?',
     stopCloudWorkerConfirmAction: "Stop worker",
+    initialTurnPausedByWorkerStop:
+      "Worker stop requested. Review the initial message before retrying.",
     stopCloudWorkerStale:
       'Gateway connection replaced before the cloud worker for "{session}" was stopped. Try again.',
     deleteSessionMenu: "Delete…",
@@ -5339,6 +5341,14 @@ export const en: TranslationMap = {
         "{percent}% used · {free} free. New writes may fail and stop the agent. Delete unneeded files or stop the cloud worker before large writes.",
     },
     sendErrors: {
+      outboxPayloadCopied:
+        "This queued message was copied from another tab. Check the conversation and retry only if it has not arrived.",
+      outboxPayloadCapacity:
+        "Browser attachment storage is full. Try a smaller batch or send/discard queued messages to free space. No new message was sent; your input is retained.",
+      outboxPayloadUnavailable:
+        "Browser attachment storage is unavailable. Use HTTPS or localhost, allow browser storage, and close older dashboard tabs before reconnecting and retrying. No new message was sent.",
+      outboxPayloadMissing:
+        "Queued attachments are missing or unreadable. This may be a stale copy from another tab. Check the conversation, then discard this row and attach the files again if needed. No new message was sent.",
       activeLeafChanged: "The session switched branches — review and resend.",
     },
     waitingForApproval: "Waiting for approval…",
@@ -5360,6 +5370,8 @@ export const en: TranslationMap = {
       notFoundExplanation: "The session may have been removed, or the link may be incorrect.",
       goToMain: "Go to main session",
       viewSessions: "View sessions",
+      catalogShareUnavailable: "This shared session route is unavailable.",
+      catalogShareInvalid: "This {catalog} share URL is invalid.",
     },
     commandResults: {
       startingNewThread: "Starting new session...",
@@ -5702,6 +5714,19 @@ export const en: TranslationMap = {
       label: "Session reset",
       description: "The earlier conversation was cleared.",
     },
+    outboxRecoveryTitle: "Saved messages need a destination",
+    outboxRecoveryDescription:
+      "An older browser version did not preserve every destination. These drafts and queued messages have not been sent by recovery. Open an empty non-Incognito conversation, then restore an entry here for review. Attachment drafts may appear separately.",
+    outboxRecoveryConfirm:
+      "Confirm this destination for the saved entry. Queued messages will remain paused for review and Retry. If delivery was uncertain, check the conversation before retrying.",
+    outboxRecoveryRestore: "Restore here for review",
+    outboxRecoveryConflict:
+      "This destination has a newer draft or queue, or changed during confirmation. Open an empty conversation and try again. The saved entry is still available.",
+    outboxRecoveryStorageFailed:
+      "Browser storage could not complete recovery. The original saved data has been retained. Free browser storage and reload to try again.",
+    outboxRecoveryFull:
+      "Recovery is full. Restore saved entries to make room; remaining legacy data is still retained in this browser.",
+    outboxRecoveryMessages: "Queued messages: {count}",
     restartRecoveryTitle: "This session ended during a restart.",
     restartRecoveryDisabled: "Its transcript is safe.",
     resumeInNewSession: "Resume in new session",
@@ -5847,6 +5872,9 @@ export const en: TranslationMap = {
         "Delivery is unconfirmed. Check delivery looks for the original message without resending it or starting a worker. Inspect the conversation, or copy the retained prompt if you choose to start a separate attempt.",
       retry: "Retry",
       retryQueuedMessage: "Retry queued message",
+      discard: "Discard",
+      discardPendingMessage:
+        "Discard this local pending copy. This does not cancel a message already received by the Gateway.",
       steer: "Steer",
       steerQueuedMessage: "Steer queued message",
       removeQueuedMessage: "Remove queued message",
@@ -5857,6 +5885,8 @@ export const en: TranslationMap = {
       cancelEdit: "Cancel editing and keep the queued message",
       states: {
         applyingSettings: "Applying chat settings",
+        blockedByUnconfirmed:
+          "Queue paused. Retry or discard the earlier unconfirmed message in the conversation.",
         runningCommand: "Running command",
         waitingForReconnect: "Waiting for reconnect",
         editing: "Editing",
@@ -5957,6 +5987,9 @@ export const en: TranslationMap = {
       tooLargeToDisplay: "This message is too large to display here.",
       unknownDate: "Unknown date",
       toolSender: "Tool",
+      forwardedFrom: "From",
+      forwardedFromAgent: "Forwarded from {agentId}",
+      forwardedMessage: "Forwarded message",
       fullContentLoadExhausted: "Could not load the full message.",
       voiceNote: "Voice note",
       duplicatesCollapsed: "{count} consecutive identical messages collapsed",
@@ -6267,6 +6300,8 @@ export const en: TranslationMap = {
       cameraPreview: "Camera preview",
       dismissVoiceInputError: "Dismiss voice input error",
       microphoneAccessFailed: "Unable to access microphone inputs.",
+      microphoneAccessPending:
+        "Waiting for microphone access. Bring this tab to the foreground and allow access if prompted.",
       microphoneBusy: "Microphone inputs are busy or unavailable to the browser.",
       microphoneStopped: "Microphone input stopped. Choose an available input and start again.",
       microphoneFallback: "Microphone {number}",
@@ -6294,7 +6329,6 @@ export const en: TranslationMap = {
         "Hold until dictation starts, then release and keep speaking. Tap Stop to insert the transcript.",
       dictationAudioUnsupported: "The Gateway returned an unsupported dictation audio format.",
       dictationBrowserAudioUnsupported: "This browser cannot capture dictation audio at 8 kHz.",
-      dictationConnecting: "Starting dictation…",
       dictationDisconnected: "Dictation stopped because the Gateway disconnected.",
       dictationFailed: "Dictation failed.",
       dictationInterruptedRecovery:
@@ -6343,6 +6377,7 @@ export const en: TranslationMap = {
     },
     voice: {
       asking: "Asking OpenClaw...",
+      preparing: "Preparing voice session...",
       connecting: "Connecting voice input...",
       listening: "Listening...",
     },
