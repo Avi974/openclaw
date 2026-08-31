@@ -18,12 +18,16 @@ const eventsFile = path.join(root, "events.jsonl");
 const commandsFile = path.join(root, "commands.jsonl");
 const optionsFile = path.join(root, "fixture-options.json");
 const options = fs.existsSync(optionsFile) ? JSON.parse(fs.readFileSync(optionsFile, "utf8")) : {};
-// Resolve identity support before cancellation can enter its cleanup handshake.
-// Ordinary fixture actors do not need the TypeScript module.
-const getFileLockProcessStartTime =
-  options.cancelDuringCleanup && ["supervise", "git"].includes(mode)
-    ? (await import("../../../src/shared/pid-alive.ts")).getFileLockProcessStartTime
-    : undefined;
+// Preload identity support before the cleanup handshake; its TypeScript graph
+// uses .js specifiers that native Node type stripping cannot resolve.
+let getFileLockProcessStartTime;
+if (options.cancelDuringCleanup && ["supervise", "git"].includes(mode)) {
+  const { tsImport } = await import("tsx/esm/api");
+  ({ getFileLockProcessStartTime } = await tsImport(
+    "../../../src/shared/pid-alive.ts",
+    import.meta.url,
+  ));
+}
 const refsFile = path.join(root, "refs.json");
 
 function resolveRef(cwd, ref) {
@@ -458,6 +462,7 @@ async function command() {
   } else if (
     options.publisher ||
     options.performance ||
+    options.pluginRelease ||
     options.releaseAdmission ||
     commandResult ||
     ["fetch", "ls-remote", "clone"].includes(operation) ||
@@ -470,7 +475,8 @@ async function command() {
     // independent results but share unique tree identities with those transports.
     const counterName =
       commandResult ||
-      ((options.performance || options.releaseAdmission) && operation !== "fetch") ||
+      ((options.performance || options.pluginRelease || options.releaseAdmission) &&
+        operation !== "fetch") ||
       ["rebase", "push", "rev-parse"].includes(operation)
         ? `${operation}-attempt.json`
         : "attempt.json";
@@ -549,12 +555,18 @@ async function command() {
       }
       const shell = owned.find((entry) => entry.role === "shell");
       const owner =
-        (options.docsAgent || options.performance || options.releaseAdmission) &&
+        (options.docsAgent ||
+          options.performance ||
+          options.pluginRelease ||
+          options.releaseAdmission) &&
         process.ppid !== shell?.pid
           ? { pid: process.ppid }
           : shell;
       const parent =
-        (options.docsAgent || options.performance || options.releaseAdmission) &&
+        (options.docsAgent ||
+          options.performance ||
+          options.pluginRelease ||
+          options.releaseAdmission) &&
         owner?.pid !== shell?.pid
           ? spawnSync("/bin/ps", ["-o", "ppid=", "-p", String(owner?.pid)], { encoding: "utf8" })
           : undefined;
@@ -596,7 +608,8 @@ async function command() {
                 ? options.pushResults
                 : operation === "rev-parse" && options.revParseResult !== undefined
                   ? [options.revParseResult]
-                  : (options.performance || options.releaseAdmission) && operation !== "fetch"
+                  : (options.performance || options.pluginRelease || options.releaseAdmission) &&
+                      operation !== "fetch"
                     ? undefined
                     : options.fetchResults;
       const result =
@@ -847,7 +860,7 @@ async function supervise() {
   for (const tool of extraTools) {
     writeConsumer(path.join(bin, tool), tool);
   }
-  if (options.performance || options.releaseAdmission) {
+  if (options.performance || options.pluginRelease || options.releaseAdmission) {
     fs.writeFileSync(
       path.join(bin, "timeout"),
       '#!/bin/bash\nwhile [[ "$1" == --* ]]; do shift; done\nshift\nexec "$@"\n',
