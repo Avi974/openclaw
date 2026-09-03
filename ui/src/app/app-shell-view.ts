@@ -23,7 +23,6 @@ import {
 import { readSessionMethodAccess } from "../lib/session-method-access.ts";
 import { normalizeAgentId } from "../lib/sessions/session-key.ts";
 import { isTerminalAvailable } from "../lib/terminal-availability.ts";
-import { buildHomeWorkContext } from "../pages/chat/chat-work-context.ts";
 import type { NewSessionTarget } from "../pages/new-session/location.ts";
 import { pluginTabKey, pluginTabRefFromSearch } from "../pages/plugin/route.ts";
 import type { ShellRouteState } from "./app-host-route-state.ts";
@@ -62,7 +61,7 @@ import {
   normalizeChatSendShortcut,
 } from "./settings.ts";
 import { renderCollapsedAssistantToggles } from "./shell-assistant-toggles.ts";
-import { createUpdateProgressWatcher } from "./update-overlay-helpers.ts";
+import { createUpdateProgressWatcher } from "./update-confirmation.ts";
 
 const EMPTY_SESSION_HAS_DRAFT = () => false;
 
@@ -203,13 +202,13 @@ export function renderApplicationShell(host: ShellViewHost) {
   const lazyElementState = host.lazyCustomElements.visibleState;
   const activeRoute = host.routeState.routeId ?? "chat";
   const sessionRoute = isSessionRouteId(activeRoute);
-  // Chat has an offline outbox, New Session keeps a local draft, and Appearance
-  // persists local preference intent for replay. Their server actions are
-  // independently gated; other pages cannot submit useful disconnected work.
+  // Session routes have an offline outbox, New Session keeps a local draft, and
+  // Appearance persists local preference intent for replay. Their server actions
+  // are independently gated; other pages cannot submit useful disconnected work.
   const pageActionsBlocked =
     gatewaySnapshot.phase === "reload-required" ||
     (!gatewayConnected &&
-      activeRoute !== "chat" &&
+      !sessionRoute &&
       activeRoute !== "new-session" &&
       activeRoute !== "appearance");
   // Plugin tabs share one route; the search picks the active item.
@@ -254,15 +253,13 @@ export function renderApplicationShell(host: ShellViewHost) {
     navDrawerOpen,
     mobileNavLayout,
   });
-  if (
-    floatingSidebarAttentionVisible({
-      navigationSurfaceHidden,
-      mobileNavLayout,
-      onboarding,
-      settingsTakeover,
-      compact: mergedChatChrome,
-    })
-  ) {
+  const floatingAttentionVisible = floatingSidebarAttentionVisible({
+    navigationSurfaceHidden,
+    mobileNavLayout,
+    onboarding,
+    compact: mergedChatChrome,
+  });
+  if (onboarding || floatingAttentionVisible) {
     host.lazyCustomElements.preload(SIDEBAR_ATTENTION_ELEMENT, { reportError: true });
   }
   const shellWidth = Math.max(globalThis.innerWidth || 0, NAV_WIDTH_MAX);
@@ -307,6 +304,7 @@ export function renderApplicationShell(host: ShellViewHost) {
       connected: gatewayConnected,
       offline: gatewaySnapshot.offlineStable,
       restartPending: gatewaySnapshot.restartPending === true,
+      suspensionPhase: gatewaySnapshot.suspensionPhase,
       queuedOutboxCount: storedOutboxes?.total ?? 0,
       lastError: gatewaySnapshot.lastError,
       outboxAttentionCountForSession: storedOutboxes?.attentionCountForSession ?? (() => 0),
@@ -328,7 +326,9 @@ export function renderApplicationShell(host: ShellViewHost) {
       devGitBranch: config.devGitBranch,
       watchUpdateProgress,
       onOpenApprovals: () => host.openApprovals(),
+      onOpenPalette: () => host.openPalette(),
       onRetryConnect: () => context.gateway.connect(),
+      onToggleSidebar: () => host.toggleNavigationSurface(),
       onOpenNewSession: openNewSession,
       onUpdateSidebarEntries: (entries: string[]) =>
         context.navigation.update({ sidebarEntries: entries }),
@@ -348,6 +348,7 @@ export function renderApplicationShell(host: ShellViewHost) {
         activeHash: host.routeState.location?.hash ?? "",
         offline: gatewaySnapshot.offlineStable,
         restartPending: gatewaySnapshot.restartPending,
+        suspensionPhase: gatewaySnapshot.suspensionPhase,
         queuedOutboxCount: storedOutboxes?.total ?? 0,
         lastError: gatewaySnapshot.lastError,
         gatewayVersion: config.serverVersion ?? gatewaySnapshot.hello?.server?.version ?? "",
@@ -410,6 +411,8 @@ export function renderApplicationShell(host: ShellViewHost) {
       : renderLazyElementModal(host.lazyCustomElements)}
     ${isOptionalElementDefined(host.commandPaletteElement)
       ? html`<openclaw-command-palette
+          .desktopAvailable=${desktopPanelAvailable}
+          .custodianAvailable=${custodianPanelAvailable}
           .onNavigate=${(routeId: RouteId, options?: ApplicationNavigationOptions) =>
             host.navigate(routeId, options)}
           .onSelectSession=${(sessionKey: string) => host.selectChatSession(sessionKey)}
@@ -463,35 +466,33 @@ export function renderApplicationShell(host: ShellViewHost) {
         .onOpenPalette=${() => host.openPalette()}
         .onToggleDrawer=${(trigger: HTMLElement) => host.toggleNavigationSurface(trigger)}
       ></openclaw-app-topbar>
-      ${!onboarding && !settingsTakeover && !mobileNavLayout
+      ${navCollapsed && !onboarding && !settingsTakeover && !mobileNavLayout
         ? html`
             <div class="shell-chrome-controls">
               <openclaw-tooltip
-                .content=${`${t(navCollapsed ? "nav.expand" : "nav.collapse")} (${formatKeyboardShortcutCombo(KEYBOARD_SHORTCUT_COMBOS.toggleSidebar)})`}
+                .content=${`${t("nav.expand")} (${formatKeyboardShortcutCombo(KEYBOARD_SHORTCUT_COMBOS.toggleSidebar)})`}
               >
                 <button
                   type="button"
                   class="shell-chrome-controls__button shell-chrome-controls__nav-toggle"
-                  aria-label=${t(navCollapsed ? "nav.expand" : "nav.collapse")}
-                  aria-expanded=${navCollapsed ? "false" : "true"}
-                  data-env-avatar=${navCollapsed && config.environment
+                  aria-label=${t("nav.expand")}
+                  aria-expanded="false"
+                  data-env-avatar=${config.environment
                     ? config.assistantIdentity.name.charAt(0)
                     : nothing}
                   @click=${() => host.toggleNavigationSurface()}
                 >
-                  ${navCollapsed ? icons.panelLeftOpen : icons.panelLeftClose}
+                  ${icons.panelLeftOpen}
                 </button>
               </openclaw-tooltip>
-              ${navCollapsed
-                ? renderNewSessionLink({
-                    basePath: context.basePath,
-                    agentId: selectedAgentId,
-                    className: "shell-chrome-controls__button shell-chrome-controls__new-thread",
-                    label: t("chat.runControls.newSession"),
-                    disabledReason: newSessionAccess.allowed ? undefined : newSessionAccess.reason,
-                    onOpen: openNewSession,
-                  })
-                : nothing}
+              ${renderNewSessionLink({
+                basePath: context.basePath,
+                agentId: selectedAgentId,
+                className: "shell-chrome-controls__button shell-chrome-controls__new-thread",
+                label: t("chat.runControls.newSession"),
+                disabledReason: newSessionAccess.allowed ? undefined : newSessionAccess.reason,
+                onOpen: openNewSession,
+              })}
               <openclaw-tooltip
                 .content=${`${t("chat.openCommandPalette")} (${formatKeyboardShortcutCombo(KEYBOARD_SHORTCUT_COMBOS.commandPalette)})`}
               >
@@ -573,7 +574,6 @@ export function renderApplicationShell(host: ShellViewHost) {
           navigationSurfaceHidden,
           mobileNavLayout,
           onboarding,
-          settingsTakeover,
           compact: mergedChatChrome,
           updateAvailable: overlaySnapshot.updateAvailable,
           updateSchedule: overlaySnapshot.updateSchedule,
@@ -640,10 +640,9 @@ export function renderApplicationShell(host: ShellViewHost) {
         .custodianAvailable=${custodianPanelAvailable}
         .homeAvailable=${homePanelAvailable}
         .custodianSuppressed=${activeRoute === "custodian"}
-        .sessionPage=${activeRoute === "chat"}
         .pageSessionKey=${host.activeSessionKey}
         .pageAgentId=${selectedAgentId}
-        .workContext=${buildHomeWorkContext(context, activeRoute, host.activeSessionKey)}
+        .pageRouteId=${activeRoute}
         .minimizeRequestId=${host.custodianMinimizeRequestId}
       ></openclaw-assistant-panel>
       ${isOptionalElementDefined(host.execApprovalElement)

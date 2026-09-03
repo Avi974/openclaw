@@ -24,17 +24,15 @@ import type {
   CronPayload,
 } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
-import { resolveCronJobLastRunStatus } from "../cron-status.ts";
 import { formatUiError } from "../format-error.ts";
 import { toNumber } from "../format.ts";
 import {
   formatMissingOperatorReadScopeMessage,
   isMissingOperatorReadScopeError,
 } from "../gateway-errors.ts";
-import { parseCronEveryMs } from "./decimal.ts";
-import { loadCronFailingCount } from "./scope.ts";
+import { parseCronDurationMs } from "./decimal.ts";
 
-export { loadCronFailingCount, loadCronScopeStats } from "./scope.ts";
+export { loadCronScopeStats } from "./scope.ts";
 
 const CRON_CHANNEL_LAST = "last";
 type CronDelivery = NonNullable<CronJob["delivery"]>;
@@ -227,9 +225,6 @@ export type CronState = {
   cronStatus: CronStatus | null;
   cronScopedTotal: number | null;
   cronScopedNextWakeAtMs: number | null;
-  // Global enabled+error job count for the stats card; null until loaded.
-  // Kept separate from cronJobs, which only holds the filtered/paged table.
-  cronFailingCount: number | null;
   cronError: string | null;
   cronForm: CronFormState;
   // True while the create panel owns the detail pane; job selection (editing)
@@ -292,7 +287,6 @@ export function createInitialCronState(
     cronStatus: null,
     cronScopedTotal: null,
     cronScopedNextWakeAtMs: null,
-    cronFailingCount: null,
     cronError: null,
     cronForm: { ...DEFAULT_CRON_FORM },
     cronCreateOpen: false,
@@ -361,7 +355,7 @@ export function validateCronForm(form: CronFormState): CronFieldErrors {
       errors.scheduleAt = "cron.errors.scheduleAtInvalid";
     }
   } else if (form.scheduleKind === "every") {
-    const everyMs = parseCronEveryMs(form.everyAmount, form.everyUnit);
+    const everyMs = parseCronDurationMs(form.everyAmount, form.everyUnit);
     if (everyMs === undefined) {
       errors.everyAmount = "cron.errors.everyAmountInvalid";
     } else if (form.triggerEnabled && everyMs < resolveCronTriggerMinIntervalMs()) {
@@ -373,11 +367,8 @@ export function validateCronForm(form: CronFormState): CronFieldErrors {
     }
     if (!form.scheduleExact) {
       const staggerAmount = form.staggerAmount.trim();
-      if (staggerAmount) {
-        const stagger = toNumber(staggerAmount, 0);
-        if (stagger <= 0) {
-          errors.staggerAmount = "cron.errors.staggerAmountInvalid";
-        }
+      if (staggerAmount && !parseCronDurationMs(staggerAmount, form.staggerUnit, true)) {
+        errors.staggerAmount = "cron.errors.staggerAmountInvalid";
       }
     }
   }
@@ -796,54 +787,8 @@ export function updateCronJobsFilter(
   state.cronJobsSortDir = patch.cronJobsSortDir ?? state.cronJobsSortDir;
 }
 
-export function getVisibleCronJobs(
-  state: Pick<
-    CronState,
-    "cronJobs" | "cronJobsScheduleKindFilter" | "cronJobsLastStatusFilter" | "cronJobsTriggerFilter"
-  >,
-): CronJob[] {
-  return state.cronJobs.filter((job) => {
-    const scheduleKind = resolveCronJobScheduleKind(job);
-    if (!scheduleKind) {
-      return false;
-    }
-    if (
-      state.cronJobsScheduleKindFilter !== "all" &&
-      scheduleKind !== state.cronJobsScheduleKindFilter
-    ) {
-      return false;
-    }
-    if (
-      state.cronJobsLastStatusFilter !== "all" &&
-      resolveCronJobLastRunStatus(job) !== state.cronJobsLastStatusFilter
-    ) {
-      return false;
-    }
-    if (state.cronJobsTriggerFilter === "conditional" && !job.trigger) {
-      return false;
-    }
-    if (state.cronJobsTriggerFilter === "unconditional" && job.trigger) {
-      return false;
-    }
-    return true;
-  });
-}
-
-function resolveCronJobScheduleKind(job: CronJob): string | null {
-  const scheduleKind = (job.schedule as { kind?: unknown } | null | undefined)?.kind;
-  if (
-    scheduleKind === "at" ||
-    scheduleKind === "every" ||
-    scheduleKind === "cron" ||
-    scheduleKind === "on-exit" ||
-    scheduleKind === "stream"
-  ) {
-    return scheduleKind;
-  }
-  return null;
-}
-
 function clearCronEditState(state: CronState) {
+  state.cronError = null;
   state.cronEditingJob = null;
   state.cronCloningJob = null;
   state.cronEditingJobId = null;
@@ -881,8 +826,8 @@ function formatDateTimeLocal(input: string): string {
 
 // Render everyMs back to the largest unit that divides it exactly, falling through
 // to decimal seconds. Sub-second remainders are built from BigInt quotient/remainder,
-// not float division, so every integer millisecond up to Number.MAX_SAFE_INTEGER
-// round-trips losslessly through parseCronEveryMs when the job is resaved.
+// not float division, so every accepted millisecond round-trips losslessly
+// through parseCronDurationMs when the job is resaved.
 function parseEverySchedule(everyMs: number): Pick<CronFormState, "everyAmount" | "everyUnit"> {
   if (everyMs % 86_400_000 === 0) {
     return { everyAmount: String(everyMs / 86_400_000), everyUnit: "days" };
@@ -893,11 +838,11 @@ function parseEverySchedule(everyMs: number): Pick<CronFormState, "everyAmount" 
   if (everyMs % 60_000 === 0) {
     return { everyAmount: String(everyMs / 60_000), everyUnit: "minutes" };
   }
-  return { everyAmount: everyMsToSecondsString(everyMs), everyUnit: "seconds" };
+  return { everyAmount: durationMsToSecondsString(everyMs), everyUnit: "seconds" };
 }
 
-function everyMsToSecondsString(everyMs: number): string {
-  const value = BigInt(everyMs);
+function durationMsToSecondsString(ms: number): string {
+  const value = BigInt(ms);
   const whole = value / 1_000n;
   const remainder = value % 1_000n;
   if (remainder === 0n) {
@@ -919,13 +864,13 @@ function parseStaggerSchedule(
   if (staggerMs % 60_000 === 0) {
     return {
       scheduleExact: false,
-      staggerAmount: String(Math.max(1, staggerMs / 60_000)),
+      staggerAmount: String(staggerMs / 60_000),
       staggerUnit: "minutes",
     };
   }
   return {
     scheduleExact: false,
-    staggerAmount: String(Math.max(1, Math.ceil(staggerMs / 1_000))),
+    staggerAmount: durationMsToSecondsString(staggerMs),
     staggerUnit: "seconds",
   };
 }
@@ -1054,7 +999,7 @@ function hasUnchangedCronSchedule(form: CronFormState, job: CronJob): boolean {
     return form.scheduleAt === formatDateTimeLocal(schedule.at);
   }
   if (schedule.kind === "every") {
-    return parseCronEveryMs(form.everyAmount, form.everyUnit) === schedule.everyMs;
+    return parseCronDurationMs(form.everyAmount, form.everyUnit) === schedule.everyMs;
   }
   if (schedule.kind === "cron") {
     const stagger = parseStaggerSchedule(schedule.staggerMs);
@@ -1078,7 +1023,7 @@ function buildCronSchedule(form: CronFormState) {
     return { kind: "at" as const, at: new Date(ms).toISOString() };
   }
   if (form.scheduleKind === "every") {
-    const everyMs = parseCronEveryMs(form.everyAmount, form.everyUnit);
+    const everyMs = parseCronDurationMs(form.everyAmount, form.everyUnit);
     if (everyMs === undefined) {
       throw new Error(t("cron.errors.invalidIntervalAmount"));
     }
@@ -1095,11 +1040,10 @@ function buildCronSchedule(form: CronFormState) {
   if (!staggerAmount) {
     return { kind: "cron" as const, expr, tz: form.cronTz.trim() || undefined };
   }
-  const staggerValue = toNumber(staggerAmount, 0);
-  if (staggerValue <= 0) {
+  const staggerMs = parseCronDurationMs(staggerAmount, form.staggerUnit, true);
+  if (staggerMs === undefined) {
     throw new Error(t("cron.errors.invalidStaggerAmount"));
   }
-  const staggerMs = form.staggerUnit === "minutes" ? staggerValue * 60_000 : staggerValue * 1_000;
   return { kind: "cron" as const, expr, tz: form.cronTz.trim() || undefined, staggerMs };
 }
 
@@ -1232,7 +1176,7 @@ export async function addCronJob(state: CronState): Promise<CronSaveResult> {
       : undefined;
     const editingPayload = editingJob ? getCronJobPayload(editingJob) : null;
     const sourceJob = editingJob ?? state.cronCloningJob;
-    // Form fields cannot represent process commands, anchors, or full timestamp/stagger precision.
+    // Form fields cannot represent process commands, anchors, or full timestamp precision.
     const schedule =
       sourceJob && hasUnchangedCronSchedule(form, sourceJob)
         ? editingJob
@@ -1373,12 +1317,10 @@ export async function addCronJob(state: CronState): Promise<CronSaveResult> {
   return result;
 }
 
-// Every mutation reloads the same trio so the table, scheduler status, and
-// the failing-count stat card can never drift apart after add/toggle/remove.
+// Mutations reload the list and scheduler status so both canonical views stay current.
 async function reloadCronJobsSnapshot(state: CronState) {
   await loadCronJobsPage(state, { tableFilters: true });
   await loadCronStatus(state);
-  await loadCronFailingCount(state);
 }
 
 export async function toggleCronJob(
@@ -1544,7 +1486,8 @@ export async function loadCronRuns(
   state.cronRunsLoadingMore = append;
   try {
     const res = await client.request<CronRunsResult>("cron.runs", {
-      ...(request.agentId ? { agentId: request.agentId } : {}),
+      // An exact job owns its history; the overview's agent filter may select another owner.
+      ...(request.scope === "all" && request.agentId ? { agentId: request.agentId } : {}),
       scope: request.scope,
       id: request.jobId ?? undefined,
       limit: request.limit,
@@ -1625,6 +1568,7 @@ export function updateCronRunsFilter(
 }
 
 function setCronEditState(state: CronState, job: CronJob, form: CronFormState) {
+  state.cronError = null;
   state.cronEditingJob = job;
   state.cronCloningJob = null;
   state.cronEditingJobId = job.id;
