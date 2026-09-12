@@ -9,7 +9,7 @@ import fs from "node:fs";
 import process from "node:process";
 
 const TOOL = "docs-mirror-freshness";
-const SOURCE_REPO = process.env.GITHUB_REPOSITORY || "openclaw/openclaw";
+const SOURCE_REPO = process.env.DOCS_MIRROR_SOURCE_REPO || "openclaw/openclaw";
 // Publish-repo contract: docs mirror to openclaw/docs (root AGENTS.md, Docs section).
 const MIRROR_REPO = "openclaw/docs";
 const SYNC_WORKFLOW = "docs-sync-publish.yml";
